@@ -188,8 +188,8 @@ std::unique_ptr<VulkanTexture> VulkanTexture::upload(VulkanDevice *device, const
         vk::AccessFlagBits::eTransferWrite,
         vk::ImageLayout::eUndefined,
         vk::ImageLayout::eTransferDstOptimal,
-        VK_QUEUE_FAMILY_IGNORED,
-        VK_QUEUE_FAMILY_IGNORED,
+        vk::QueueFamilyIgnored,
+        vk::QueueFamilyIgnored,
         ret->handle(),
         vk::ImageSubresourceRange{
             vk::ImageAspectFlagBits::eColor,
