@@ -18,6 +18,7 @@ public:
     std::unique_ptr<DecorationRenderer> createDecorationRenderer(Decoration::DecoratedClientImpl *) override;
     std::unique_ptr<ShadowTextureProvider> createShadowTextureProvider(Shadow *shadow) override;
 
+    [[nodiscard]]
     bool animationsSupported() const override;
 };
 

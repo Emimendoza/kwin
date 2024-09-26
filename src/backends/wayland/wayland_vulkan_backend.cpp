@@ -18,9 +18,7 @@
 
 #include <xf86drm.h>
 
-namespace KWin
-{
-namespace Wayland
+namespace KWin::Wayland
 {
 
 WaylandVulkanBackend::WaylandVulkanBackend(WaylandBackend *backend)
@@ -49,7 +47,8 @@ VulkanDevice *WaylandVulkanBackend::findDevice() const
     for (const auto &device : m_devices) {
         if (device->primaryNode() && compare(*device->primaryNode())) {
             return device.get();
-        } else if (device->renderNode() && compare(*device->renderNode())) {
+        }
+        if (device->renderNode() && compare(*device->renderNode())) {
             return device.get();
         }
     }
@@ -73,10 +72,10 @@ bool WaylandVulkanBackend::init()
     }
 
     const auto createOutput = [this](Output *output) {
-        m_outputs[output] = std::make_unique<WaylandVulkanLayer>(static_cast<WaylandOutput *>(output), this, m_mainDevice, m_backend->drmDevice()->allocator(), m_backend->display());
+        m_outputs[output] = std::make_unique<WaylandVulkanLayer>(dynamic_cast<WaylandOutput *>(output), this, m_mainDevice, m_backend->drmDevice()->allocator(), m_backend->display());
     };
     const auto outputs = m_backend->outputs();
-    std::for_each(outputs.begin(), outputs.end(), createOutput);
+    std::ranges::for_each(outputs, createOutput);
     connect(m_backend, &WaylandBackend::outputAdded, this, createOutput);
     connect(m_backend, &WaylandBackend::outputRemoved, this, [this](Output *output) {
         m_outputs.erase(output);
@@ -99,9 +98,10 @@ OutputLayer *WaylandVulkanBackend::primaryLayer(Output *output)
     return m_outputs[output].get();
 }
 
-void WaylandVulkanBackend::present(Output *output, const std::shared_ptr<OutputFrame> &frame)
+bool WaylandVulkanBackend::present(Output *output, const std::shared_ptr<OutputFrame> &frame)
 {
-    static_cast<WaylandVulkanLayer *>(primaryLayer(output))->present(frame);
+    dynamic_cast<WaylandVulkanLayer *>(primaryLayer(output))->present(frame);
+    return true;
 }
 
 WaylandBackend *WaylandVulkanBackend::backend() const
@@ -110,7 +110,8 @@ WaylandBackend *WaylandVulkanBackend::backend() const
 }
 
 WaylandVulkanLayer::WaylandVulkanLayer(WaylandOutput *output, WaylandVulkanBackend *backend, VulkanDevice *device, GraphicsBufferAllocator *allocator, WaylandDisplay *display)
-    : m_backend(backend)
+    : OutputLayer(nullptr)
+    , m_backend(backend)
     , m_output(output)
     , m_device(device)
     , m_allocator(allocator)
@@ -120,7 +121,7 @@ WaylandVulkanLayer::WaylandVulkanLayer(WaylandOutput *output, WaylandVulkanBacke
 
 WaylandVulkanLayer::~WaylandVulkanLayer() = default;
 
-std::optional<OutputLayerBeginFrameInfo> WaylandVulkanLayer::beginFrame()
+std::optional<OutputLayerBeginFrameInfo> WaylandVulkanLayer::doBeginFrame()
 {
     if (!m_swapchain || m_swapchain->size() != m_output->modeSize()) {
         const auto hostFormats = m_display->linuxDmabuf()->formats();
@@ -153,7 +154,7 @@ std::optional<OutputLayerBeginFrameInfo> WaylandVulkanLayer::beginFrame()
     };
 }
 
-bool WaylandVulkanLayer::endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion)
+bool WaylandVulkanLayer::doEndFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame)
 {
     const bool ret = m_device->submitCommandBufferBlocking(m_currentSlot->commandBuffer());
     m_presentationBuffer = m_backend->backend()->importBuffer(m_currentSlot->buffer());
@@ -161,12 +162,6 @@ bool WaylandVulkanLayer::endFrame(const QRegion &renderedRegion, const QRegion &
     m_swapchain->release(m_currentSlot.get());
     m_output->renderLoop()->scheduleRepaint(nullptr);
     return ret;
-}
-
-std::chrono::nanoseconds WaylandVulkanLayer::queryRenderTime() const
-{
-    // TODO
-    return std::chrono::nanoseconds::zero();
 }
 
 void WaylandVulkanLayer::present(const std::shared_ptr<OutputFrame> &frame)
@@ -181,5 +176,14 @@ void WaylandVulkanLayer::present(const std::shared_ptr<OutputFrame> &frame)
     surface->commit();
     Q_EMIT m_output->outputChange(infiniteRegion());
 }
+
+QHash<uint32_t, QList<uint64_t>> WaylandVulkanLayer::supportedDrmFormats() const
+{
+    return m_backend->backend()->display()->linuxDmabuf()->formats();
+}
+
+DrmDevice *WaylandVulkanLayer::scanoutDevice() const
+{
+    return m_backend->drmDevice();
 }
 }

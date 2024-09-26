@@ -22,7 +22,7 @@ VulkanTexture::VulkanTexture(vk::Format format, vk::UniqueImage &&image, std::ve
 {
 }
 
-VulkanTexture::VulkanTexture(VulkanTexture &&other)
+VulkanTexture::VulkanTexture(VulkanTexture &&other) noexcept
     : m_format(other.m_format)
     , m_memory(std::move(other.m_memory))
     , m_image(std::move(other.m_image))

@@ -27,20 +27,25 @@ namespace Wayland
 class WaylandDisplay;
 class WaylandVulkanLayer;
 
-class WaylandVulkanBackend : public VulkanBackend
+class WaylandVulkanBackend final : public VulkanBackend
 {
 public:
-    WaylandVulkanBackend(WaylandBackend *backend);
+    explicit WaylandVulkanBackend(WaylandBackend *backend);
     ~WaylandVulkanBackend() override;
 
     bool init() override;
     bool testImportBuffer(GraphicsBuffer *buffer) override;
+
+    [[nodiscard]]
     QHash<uint32_t, QVector<uint64_t>> supportedFormats() const override;
     OutputLayer *primaryLayer(Output *output) override;
-    void present(Output *output, const std::shared_ptr<OutputFrame> &frame) override;
+    bool present(Output *output, const std::shared_ptr<OutputFrame> &frame) override;
+
+    [[nodiscard]]
     WaylandBackend *backend() const;
 
 private:
+    [[nodiscard]]
     VulkanDevice *findDevice() const;
 
     WaylandBackend *const m_backend;
@@ -49,16 +54,21 @@ private:
     std::map<Output *, std::unique_ptr<WaylandVulkanLayer>> m_outputs;
 };
 
-class WaylandVulkanLayer : public OutputLayer
+class WaylandVulkanLayer final : public OutputLayer
 {
 public:
     explicit WaylandVulkanLayer(WaylandOutput *output, WaylandVulkanBackend *backend, VulkanDevice *device, GraphicsBufferAllocator *allocator, WaylandDisplay *display);
-    ~WaylandVulkanLayer();
+    ~WaylandVulkanLayer() override;
 
-    std::optional<OutputLayerBeginFrameInfo> beginFrame() override;
-    bool endFrame(const QRegion &renderedRegion, const QRegion &damagedRegion) override;
-    std::chrono::nanoseconds queryRenderTime() const override;
+    std::optional<OutputLayerBeginFrameInfo> doBeginFrame() override;
+    bool doEndFrame(const QRegion &renderedRegion, const QRegion &damagedRegion, OutputFrame *frame) override;
     void present(const std::shared_ptr<OutputFrame> &frame);
+
+    [[nodiscard]]
+    QHash<uint32_t, QList<uint64_t>> supportedDrmFormats() const override;
+
+    [[nodiscard]]
+    DrmDevice *scanoutDevice() const override;
 
 private:
     WaylandVulkanBackend *const m_backend;

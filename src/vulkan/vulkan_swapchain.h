@@ -22,9 +22,13 @@ public:
     explicit VulkanSwapchainSlot(GraphicsBuffer *buffer, std::unique_ptr<VulkanTexture> &&texture, vk::UniqueCommandBuffer &&commandBuffer);
     ~VulkanSwapchainSlot();
 
+    [[nodiscard]]
     GraphicsBuffer *buffer() const;
+    [[nodiscard]]
     VulkanTexture *texture() const;
+    [[nodiscard]]
     vk::CommandBuffer commandBuffer() const;
+    [[nodiscard]]
     int age() const;
 
 private:
@@ -40,14 +44,17 @@ class KWIN_EXPORT VulkanSwapchain
 public:
     explicit VulkanSwapchain(VulkanDevice *device, GraphicsBufferAllocator *allocator, const QSize &size, uint32_t format, uint64_t modifier, const std::shared_ptr<VulkanSwapchainSlot> &initialSlot);
     ~VulkanSwapchain();
-
+    [[nodiscard]]
     QSize size() const;
+    [[nodiscard]]
     uint32_t format() const;
+    [[nodiscard]]
     uint64_t modifier() const;
 
     std::shared_ptr<VulkanSwapchainSlot> acquire();
     void release(VulkanSwapchainSlot *slot);
 
+    // TODO: Add support for previous swapchain
     static std::shared_ptr<VulkanSwapchain> create(VulkanDevice *device, GraphicsBufferAllocator *allocator, const QSize &size, uint32_t format, const QVector<uint64_t> &modifiers);
 
 private:

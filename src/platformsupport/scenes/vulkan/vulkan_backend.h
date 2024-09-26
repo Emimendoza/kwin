@@ -29,10 +29,11 @@ class VulkanBackend : public RenderBackend
     Q_OBJECT
 public:
     explicit VulkanBackend();
-    ~VulkanBackend();
+    ~VulkanBackend() override;
 
     virtual bool init();
-    CompositingType compositingType() const override final;
+    [[nodiscard]]
+    CompositingType compositingType() const final;
     std::unique_ptr<SurfaceTexture> createSurfaceTextureWayland(SurfacePixmap *pixmap) override;
 
 protected:

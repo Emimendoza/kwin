@@ -97,7 +97,7 @@ void VulkanSwapchain::release(VulkanSwapchainSlot *released)
 {
     for (const auto &slot : m_slots) {
         if (slot.get() == released) {
-            slot->m_age = 1;
+            released->m_age = 1;
         } else if (slot->age() > 0) {
             slot->m_age++;
         }

@@ -28,9 +28,9 @@ class KWIN_EXPORT VulkanDevice : public QObject
 public:
     explicit VulkanDevice(vk::Instance instance, vk::PhysicalDevice physicalDevice, vk::Device logicalDevice, uint32_t queueFamilyIndex, vk::Queue queue,
                           std::optional<dev_t> primaryNode, std::optional<dev_t> renderNode);
-    explicit VulkanDevice(VulkanDevice &&other);
+    VulkanDevice(VulkanDevice &&other) noexcept;
     VulkanDevice(const VulkanDevice &) = delete;
-    ~VulkanDevice();
+    ~VulkanDevice() override;
 
     std::shared_ptr<VulkanTexture> importClientBuffer(GraphicsBuffer *buffer);
     std::optional<VulkanTexture> importDmabuf(GraphicsBuffer *buffer) const;

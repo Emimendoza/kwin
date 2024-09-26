@@ -40,7 +40,7 @@ VulkanDevice::VulkanDevice(vk::Instance instance, vk::PhysicalDevice physicalDev
     m_commandPool = std::move(cmdPool);
 }
 
-VulkanDevice::VulkanDevice(VulkanDevice &&other)
+VulkanDevice::VulkanDevice(VulkanDevice &&other) noexcept
     : m_physical(other.m_physical)
     , m_logical(std::exchange(other.m_logical, {}))
     , m_queueFamilyIndex(other.m_queueFamilyIndex)
@@ -94,13 +94,17 @@ static bool isDisjoint(const DmaBufAttributes &attributes)
     if (attributes.planeCount == 1) {
         return false;
     }
-    struct stat stat1;
+    struct stat stat1
+    {
+    };
     if (fstat(attributes.fd[0].get(), &stat1) != 0) {
         qCWarning(KWIN_VULKAN) << "failed to fstat dmabuf";
         return true;
     }
     for (int i = 1; i < attributes.planeCount; i++) {
-        struct stat stati;
+        struct stat stati
+        {
+        };
         if (fstat(attributes.fd[i].get(), &stati) != 0) {
             qCWarning(KWIN_VULKAN) << "failed to fstat dmabuf";
             return false;
@@ -249,7 +253,7 @@ std::optional<VulkanTexture> VulkanDevice::importDmabuf(GraphicsBuffer *buffer) 
     return std::make_optional<VulkanTexture>(format->vulkanFormat, std::move(image), std::move(deviceMemory), std::move(imageView));
 }
 
-QHash<uint32_t, QVector<uint64_t>> VulkanDevice::queryFormats(vk::ImageUsageFlags flags) const
+QHash<uint32_t, QVector<uint64_t>> VulkanDevice::queryFormats(const vk::ImageUsageFlags flags) const
 {
     QHash<uint32_t, QVector<uint64_t>> ret;
     for (const uint32_t drmFormat : s_knownDrmFormats) {

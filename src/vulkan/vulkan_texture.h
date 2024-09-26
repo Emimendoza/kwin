@@ -21,13 +21,13 @@ class KWIN_EXPORT VulkanTexture
 {
 public:
     explicit VulkanTexture(vk::Format format, vk::UniqueImage &&image, std::vector<vk::UniqueDeviceMemory> &&memory, vk::UniqueImageView &&imageView);
-    explicit VulkanTexture(VulkanTexture &&other);
+    VulkanTexture(VulkanTexture &&other) noexcept;
     VulkanTexture(const VulkanTexture &) = delete;
     ~VulkanTexture();
 
-    vk::Image handle() const;
-    vk::ImageView view() const;
-    vk::Format format() const;
+    [[nodiscard]] vk::Image handle() const;
+    [[nodiscard]] vk::ImageView view() const;
+    [[nodiscard]] vk::Format format() const;
 
     static std::unique_ptr<VulkanTexture> allocate(VulkanDevice *device, vk::Format format, const QSize &size);
     static std::unique_ptr<VulkanTexture> upload(VulkanDevice *device, const QImage &image);
