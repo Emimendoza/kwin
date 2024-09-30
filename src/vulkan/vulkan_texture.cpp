@@ -101,7 +101,7 @@ std::unique_ptr<VulkanTexture> VulkanTexture::allocate(VulkanDevice *device, vk:
         vk::ImageLayout::eUndefined,
     });
     if (imageResult != vk::Result::eSuccess) {
-        qCWarning(KWIN_VULKAN) << "creating image failed!" << vk::to_string(imageResult);
+        qCWarning(KWIN_VULKAN) << "creating image failed!" << KWin::VKto_string(imageResult);
         return nullptr;
     }
     auto memory = device->allocateMemory(image.get(), vk::MemoryPropertyFlagBits::eDeviceLocal);
@@ -110,7 +110,7 @@ std::unique_ptr<VulkanTexture> VulkanTexture::allocate(VulkanDevice *device, vk:
     }
     const vk::Result bindResult = device->logicalDevice().bindImageMemory(image.get(), memory.get(), 0);
     if (bindResult != vk::Result::eSuccess) {
-        qCWarning(KWIN_VULKAN) << "binding memory to image failed!" << vk::to_string(bindResult);
+        qCWarning(KWIN_VULKAN) << "binding memory to image failed!" << KWin::VKto_string(bindResult);
         return nullptr;
     }
     auto [viewResult, view] = device->logicalDevice().createImageViewUnique(vk::ImageViewCreateInfo{
@@ -128,7 +128,7 @@ std::unique_ptr<VulkanTexture> VulkanTexture::allocate(VulkanDevice *device, vk:
         },
     });
     if (viewResult != vk::Result::eSuccess) {
-        qCWarning(KWIN_VULKAN) << "creating image view failed!" << vk::to_string(viewResult);
+        qCWarning(KWIN_VULKAN) << "creating image view failed!" << KWin::VKto_string(viewResult);
         return nullptr;
     }
     std::vector<vk::UniqueDeviceMemory> memories;
@@ -150,11 +150,11 @@ std::unique_ptr<VulkanTexture> VulkanTexture::upload(VulkanDevice *device, const
     // allocate a CPU-visible buffer for the data, and copy the data into it
     const auto [bufferResult, stagingBuffer] = device->logicalDevice().createBufferUnique(vk::BufferCreateInfo{
         vk::BufferCreateFlags(),
-        vk::DeviceSize(image.sizeInBytes()),
+        static_cast<vk::DeviceSize>(image.sizeInBytes()),
         vk::BufferUsageFlagBits::eTransferSrc,
     });
     if (bufferResult != vk::Result::eSuccess) {
-        qCWarning(KWIN_VULKAN) << "creating staging buffer failed!" << vk::to_string(bufferResult);
+        qCWarning(KWIN_VULKAN) << "creating staging buffer failed!" << KWin::VKto_string(bufferResult);
         return nullptr;
     }
     const auto stagingMemory = device->allocateMemory(stagingBuffer.get(), vk::MemoryPropertyFlagBits::eHostVisible);
@@ -163,14 +163,14 @@ std::unique_ptr<VulkanTexture> VulkanTexture::upload(VulkanDevice *device, const
     }
     const auto [mapResult, dataPtr] = device->logicalDevice().mapMemory(stagingMemory.get(), 0, image.sizeInBytes(), vk::MemoryMapFlags());
     if (mapResult != vk::Result::eSuccess) {
-        qCWarning(KWIN_VULKAN) << "mapping memory failed!" << vk::to_string(mapResult);
+        qCWarning(KWIN_VULKAN) << "mapping memory failed!" << KWin::VKto_string(mapResult);
         return nullptr;
     }
     std::memcpy(dataPtr, image.constBits(), image.sizeInBytes());
     device->logicalDevice().unmapMemory(stagingMemory.get());
     const vk::Result bindResult = device->logicalDevice().bindBufferMemory(stagingBuffer.get(), stagingMemory.get(), 0);
     if (bindResult != vk::Result::eSuccess) {
-        qCWarning(KWIN_VULKAN) << "binding memory to buffer failed!" << vk::to_string(bindResult);
+        qCWarning(KWIN_VULKAN) << "binding memory to buffer failed!" << KWin::VKto_string(bindResult);
         return nullptr;
     }
 
@@ -180,7 +180,7 @@ std::unique_ptr<VulkanTexture> VulkanTexture::upload(VulkanDevice *device, const
         vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
     });
     if (cmdBeginResult != vk::Result::eSuccess) {
-        qCWarning(KWIN_VULKAN) << "failed to begin command buffer" << vk::to_string(cmdBeginResult);
+        qCWarning(KWIN_VULKAN) << "failed to begin command buffer" << KWin::VKto_string(cmdBeginResult);
         return nullptr;
     }
     vk::ImageMemoryBarrier barrier{

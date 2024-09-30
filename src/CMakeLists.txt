@@ -219,6 +219,7 @@ target_sources(kwin PRIVATE
     vulkan/vulkan_logging.cpp
     vulkan/vulkan_swapchain.cpp
     vulkan/vulkan_texture.cpp
+        vulkan/vulkan_include.cpp
     wayland_server.cpp
     waylandshellintegration.cpp
     waylandwindow.cpp

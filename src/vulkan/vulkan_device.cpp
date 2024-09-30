@@ -13,6 +13,7 @@
 
 #include <QDebug>
 #include <sys/stat.h>
+#include <vulkan/vulkan_hash.hpp>
 
 namespace KWin
 {
@@ -28,16 +29,39 @@ VulkanDevice::VulkanDevice(vk::Instance instance, vk::PhysicalDevice physicalDev
     , m_formats(queryFormats(vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst))
     , m_memoryProperties(physicalDevice.getMemoryProperties())
     , m_loader(instance, vkGetInstanceProcAddr, logicalDevice)
+    , m_nextHandle(ALL + 1)
+    , m_fences{{ALL, {}}}
 {
     auto [result, cmdPool] = m_logical.createCommandPoolUnique(vk::CommandPoolCreateInfo{
         vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
         m_queueFamilyIndex,
     });
     if (result != vk::Result::eSuccess) {
-        qCWarning(KWIN_VULKAN) << "creating a command pool failed:" << vk::to_string(result);
+        qCWarning(KWIN_VULKAN) << "creating a command pool failed:" << KWin::VKto_string(result);
         return;
     }
     m_commandPool = std::move(cmdPool);
+}
+
+VulkanDevice::VulkanDeviceHandle VulkanDevice::acquireHandle()
+{
+    m_semaphores[m_nextHandle] = {};
+    m_fences[m_nextHandle] = {};
+    return m_nextHandle++;
+}
+
+bool VulkanDevice::releaseHandle(const VulkanDeviceHandle handle)
+{
+    if (handle == ALL) {
+        qCWarning(KWIN_VULKAN) << "can't release the ALL handle";
+        return false;
+    }
+    if (!waitFence(handle)) {
+        return false;
+    }
+    m_semaphores.remove(handle);
+    m_fences.remove(handle);
+    return true;
 }
 
 VulkanDevice::VulkanDevice(VulkanDevice &&other) noexcept
@@ -52,6 +76,12 @@ VulkanDevice::VulkanDevice(VulkanDevice &&other) noexcept
     , m_commandPool(std::move(other.m_commandPool))
     , m_loader(std::move(other.m_loader))
     , m_importedTextures(other.m_importedTextures)
+    , m_nextHandle(other.m_nextHandle)
+    , m_semaphores(std::move(m_semaphores))
+    , m_fences(std::move(other.m_fences))
+    , m_fenceSemaphores(std::move(other.m_fenceSemaphores))
+    , m_freeSemaphores(std::move(other.m_freeSemaphores))
+    , m_freeFences(std::move(other.m_freeFences))
 {
 }
 
@@ -164,7 +194,7 @@ std::optional<VulkanTexture> VulkanDevice::importDmabuf(GraphicsBuffer *buffer) 
     };
     auto [imageResult, image] = m_logical.createImageUnique(imageCI);
     if (imageResult != vk::Result::eSuccess) {
-        qCWarning(KWIN_VULKAN) << "creating vulkan image failed!" << vk::to_string(imageResult);
+        qCWarning(KWIN_VULKAN) << "creating vulkan image failed!" << KWin::VKto_string(imageResult);
         return std::nullopt;
     }
 
@@ -175,7 +205,7 @@ std::optional<VulkanTexture> VulkanDevice::importDmabuf(GraphicsBuffer *buffer) 
     for (uint32_t i = 0; i < memoryCount; i++) {
         const auto [memoryFdResult, memoryFdProperties] = m_logical.getMemoryFdPropertiesKHR(vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT, attributes->fd[i].get(), m_loader);
         if (memoryFdResult != vk::Result::eSuccess) {
-            qCWarning(KWIN_VULKAN) << "failed to get memory fd properties!" << vk::to_string(memoryFdResult);
+            qCWarning(KWIN_VULKAN) << "failed to get memory fd properties!" << KWin::VKto_string(memoryFdResult);
             return std::nullopt;
         }
         vk::ImageMemoryRequirementsInfo2 memRequirementsInfo{image.get()};
@@ -246,7 +276,7 @@ std::optional<VulkanTexture> VulkanDevice::importDmabuf(GraphicsBuffer *buffer) 
         },
     });
     if (imageViewResult != vk::Result::eSuccess) {
-        qCWarning(KWIN_VULKAN) << "couldn't create image view!" << vk::to_string(imageViewResult);
+        qCWarning(KWIN_VULKAN) << "couldn't create image view!" << KWin::VKto_string(imageViewResult);
         return std::nullopt;
     }
 
@@ -299,14 +329,14 @@ QHash<uint32_t, QVector<uint64_t>> VulkanDevice::queryFormats(const vk::ImageUsa
 
             const vk::Result result = m_physical.getImageFormatProperties2(&imageInfo, &imageProps);
             if (result == vk::Result::eErrorFormatNotSupported) {
-                qCWarning(KWIN_VULKAN) << "unsupported format:" << vk::to_string(info.vulkanFormat);
+                qCWarning(KWIN_VULKAN) << "unsupported format:" << KWin::VKto_string(info.vulkanFormat);
                 continue;
             } else if (result != vk::Result::eSuccess) {
-                qCWarning(KWIN_VULKAN) << "failed to get image format properties:" << vk::to_string(result);
+                qCWarning(KWIN_VULKAN) << "failed to get image format properties:" << KWin::VKto_string(result);
                 continue;
             }
             if (!(externalProps.externalMemoryProperties.externalMemoryFeatures & vk::ExternalMemoryFeatureFlagBits::eImportable)) {
-                qCWarning(KWIN_VULKAN) << "can't import format" << vk::to_string(info.vulkanFormat);
+                qCWarning(KWIN_VULKAN) << "can't import format" << KWin::VKto_string(info.vulkanFormat);
                 continue;
             }
             if (!(imageProps.imageFormatProperties.sampleCounts & vk::SampleCountFlagBits::e1)) {
@@ -342,39 +372,204 @@ vk::UniqueCommandBuffer VulkanDevice::allocateCommandBuffer()
         1,
     });
     if (result != vk::Result::eSuccess) {
-        qCWarning(KWIN_VULKAN) << "failed to allocate oneshot command buffer:" << vk::to_string(result);
+        qCWarning(KWIN_VULKAN) << "failed to allocate oneshot command buffer:" << KWin::VKto_string(result);
         return {};
     }
     return std::move(buffers.front());
 }
 
-bool VulkanDevice::submitCommandBufferBlocking(vk::CommandBuffer cmd)
+std::optional<vk::Fence> VulkanDevice::acquireFence()
 {
-    const std::vector<vk::Semaphore> waitBeforeExecution{};
-    const std::vector<vk::PipelineStageFlags> waitDestinationStageMask{};
-    const std::vector<vk::Semaphore> signalSemaphores{};
-    const std::vector<vk::CommandBuffer> commandBuffers{cmd};
-    const auto [fenceResult, executionDone] = m_logical.createFenceUnique(vk::FenceCreateInfo{});
+    if (!m_freeFences.isEmpty()) {
+        return m_freeFences.pop();
+    }
+    auto [fenceResult, newFence] = m_logical.createFence(vk::FenceCreateInfo{});
     if (fenceResult != vk::Result::eSuccess) {
-        qCWarning(KWIN_VULKAN) << "failed to create fence";
+        qCWarning(KWIN_VULKAN) << "failed to create fence:" << KWin::VKto_string(fenceResult);
+        return std::nullopt;
+    }
+    return newFence;
+}
+
+std::optional<vk::Semaphore> VulkanDevice::acquireSemaphore()
+{
+    if (!m_freeSemaphores.isEmpty()) {
+        return m_freeSemaphores.pop();
+    }
+    auto [semaphoreResult, newSemaphore] = m_logical.createSemaphore(vk::SemaphoreCreateInfo{});
+    if (semaphoreResult != vk::Result::eSuccess) {
+        qCWarning(KWIN_VULKAN) << "failed to create semaphore:" << KWin::VKto_string(semaphoreResult);
+        return std::nullopt;
+    }
+    return newSemaphore;
+}
+
+template<bool wait, bool signal>
+bool VulkanDevice::submitCommandBuffer(const vk::CommandBuffer cmd, const VulkanDeviceHandle handle)
+{
+    const auto f = acquireFence();
+    if (f == std::nullopt) {
         return false;
     }
-    const auto submitResult = m_queue.submit(vk::SubmitInfo{
-                                                 waitBeforeExecution,
-                                                 waitDestinationStageMask,
-                                                 commandBuffers,
-                                                 signalSemaphores,
-                                             },
-                                             executionDone.get());
-    if (submitResult != vk::Result::eSuccess) {
-        qCWarning(KWIN_VULKAN) << "submitting command buffers failed:" << vk::to_string(submitResult);
+    const vk::Fence vk_fence = f.value();
+
+    const std::array commandBuffers{cmd};
+    constexpr std::array<vk::PipelineStageFlags, 0> waitDestinationStageMask{};
+
+    std::vector<vk::Semaphore> signalSemaphores{};
+    if constexpr (signal) {
+        if (handle != ALL) {
+            const auto semaphore = acquireSemaphore();
+            if (semaphore == std::nullopt) {
+                return false;
+            }
+            signalSemaphores.push_back(semaphore.value());
+        } else {
+            for (auto i = 0; i < m_semaphores.size(); i++) {
+                const auto semaphore = acquireSemaphore();
+                if (semaphore == std::nullopt) {
+                    // return semaphores to the free list
+                    for (const auto &s : signalSemaphores) {
+                        m_freeSemaphores.push(s);
+                    }
+                    m_freeFences.push(vk_fence);
+                    return false;
+                }
+                signalSemaphores.push_back(semaphore.value());
+            }
+        }
+    }
+    std::vector<vk::Semaphore> tempVec;
+    std::vector<vk::Semaphore> *waitBeforeExecution = &tempVec;
+
+    if constexpr (wait) {
+        if (handle != ALL) {
+            waitBeforeExecution = &m_semaphores[handle];
+        } else {
+            // We basically want to wait for all semaphores
+            for (const auto &vec : m_semaphores) {
+                // we copy the semaphores to our temporary vector
+                tempVec.insert(tempVec.end(), vec.begin(), vec.end());
+            }
+        }
+    }
+
+    const auto submit_result = m_queue.submit(vk::SubmitInfo{
+                                                  *waitBeforeExecution,
+                                                  waitDestinationStageMask,
+                                                  commandBuffers,
+                                                  signalSemaphores,
+                                              },
+                                              vk_fence);
+
+    switch (submit_result) {
+    case vk::Result::eSuccess:
+        break;
+    case vk::Result::eErrorDeviceLost:
+        // TODO: handle device lost
+    default: // any other error
+        qCWarning(KWIN_VULKAN) << "failed to submit command buffer:" << KWin::VKto_string(submit_result);
+        // vulkan spec mentions that the synchronization primitives are not modified in case of an error
+        // excluding the case of device lost, so we have to return them
+        if constexpr (signal) {
+            for (const auto &s : signalSemaphores) {
+                m_freeSemaphores.push(s);
+            }
+        }
+        m_freeFences.push(vk_fence);
         return false;
     }
-    const auto waitResult = m_logical.waitForFences(executionDone.get(), true, 1'000'000'000);
-    if (waitResult != vk::Result::eSuccess) {
-        qCWarning(KWIN_VULKAN) << "waiting for rendering to complete failed:" << vk::to_string(waitResult);
+
+    // we have to store the fence and the semaphores it depends on for later freeing
+    m_fences[handle].push_back(vk_fence);
+    m_fenceSemaphores[vk_fence] = std::move(*waitBeforeExecution);
+    if (handle != ALL) {
+        m_semaphores[handle] = std::move(signalSemaphores);
+        return true;
+    }
+    size_t i = 0;
+    for (auto &vec : m_semaphores) {
+        vec.clear();
+        vec.push_back(signalSemaphores[i]);
+        i++;
+    }
+    return true;
+}
+
+template<bool wait>
+bool VulkanDevice::submitCommandBufferBlocking(const vk::CommandBuffer cmd, const VulkanDeviceHandle handle)
+{
+    // No need to signal others since there is no others to signal
+    if (!submitCommandBuffer<wait, false>(cmd, handle)) {
         return false;
     }
+    return waitFence(handle);
+}
+
+bool VulkanDevice::waitFence(const VulkanDeviceHandle handle, size_t count)
+{
+    if (handle == ALL) {
+        return waitAllFences();
+    }
+
+    while (!m_fences[ALL].isEmpty()) {
+        if (!waitFence(m_fences[ALL].front())) {
+            return false;
+        }
+        m_fences[ALL].pop_front();
+    }
+
+    if (count == 0 || count > m_fences[handle].size()) {
+        count = m_fences[handle].size();
+    }
+
+    for (auto i = 0; i < count; i++) {
+        if (!waitFence(m_fences[handle].front())) {
+            return false;
+        }
+        m_fences[handle].pop_front();
+    }
+    return true;
+}
+
+bool VulkanDevice::waitAllFences()
+{
+    while (!m_fences[ALL].isEmpty()) {
+        if (!waitFence(m_fences[ALL].front())) {
+            return false;
+        }
+        m_fences[ALL].pop_front();
+    }
+    for (auto &fences : m_fences) {
+        while (!fences.isEmpty()) {
+            if (!waitFence(fences.front())) {
+                return false;
+            }
+            fences.pop_front();
+        }
+    }
+    return true;
+}
+
+bool VulkanDevice::waitFence(const vk::Fence &fence)
+{
+    auto &semaphores = m_fenceSemaphores[fence];
+    auto result = m_logical.waitForFences(fence, VK_TRUE, UINT64_MAX);
+    if (result != vk::Result::eSuccess) {
+        qCWarning(KWIN_VULKAN) << "failed to wait for fence:" << KWin::VKto_string(result);
+        return false;
+    }
+    result = m_logical.resetFences(fence);
+    if (result != vk::Result::eSuccess) {
+        qCWarning(KWIN_VULKAN) << "failed to reset fence:" << KWin::VKto_string(result) << " memory leak!";
+        // TODO: Prevent memory leak
+    } else {
+        m_freeFences.push(fence);
+    }
+    for (const auto &s : semaphores) {
+        m_freeSemaphores.push(s);
+    }
+    semaphores.clear();
     return true;
 }
 
@@ -389,7 +584,7 @@ vk::UniqueDeviceMemory VulkanDevice::allocateMemory(vk::Buffer buffer, vk::Memor
         if (result == vk::Result::eSuccess) {
             return std::move(ret);
         } else {
-            qCWarning(KWIN_VULKAN) << "Allocating memory for a buffer failed:" << vk::to_string(result);
+            qCWarning(KWIN_VULKAN) << "Allocating memory for a buffer failed:" << KWin::VKto_string(result);
             return {};
         }
     } else {
@@ -409,7 +604,7 @@ vk::UniqueDeviceMemory VulkanDevice::allocateMemory(vk::Image image, vk::MemoryP
         if (result == vk::Result::eSuccess) {
             return std::move(ret);
         } else {
-            qCWarning(KWIN_VULKAN) << "Allocating memory for an image failed:" << vk::to_string(result);
+            qCWarning(KWIN_VULKAN) << "Allocating memory for an image failed:" << KWin::VKto_string(result);
             return {};
         }
     } else {
@@ -447,4 +642,13 @@ vk::Queue VulkanDevice::renderQueue() const
 {
     return m_queue;
 }
+// Template instantiation
+
+template bool VulkanDevice::submitCommandBuffer<false, false>(vk::CommandBuffer cmd, VulkanDeviceHandle handle);
+template bool VulkanDevice::submitCommandBuffer<false, true>(vk::CommandBuffer cmd, VulkanDeviceHandle handle);
+template bool VulkanDevice::submitCommandBuffer<true, false>(vk::CommandBuffer cmd, VulkanDeviceHandle handle);
+template bool VulkanDevice::submitCommandBuffer<true, true>(vk::CommandBuffer cmd, VulkanDeviceHandle handle);
+
+template bool VulkanDevice::submitCommandBufferBlocking<false>(vk::CommandBuffer cmd, VulkanDeviceHandle handle);
+template bool VulkanDevice::submitCommandBufferBlocking<true>(vk::CommandBuffer cmd, VulkanDeviceHandle handle);
 }

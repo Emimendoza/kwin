@@ -54,7 +54,6 @@ public:
     std::shared_ptr<VulkanSwapchainSlot> acquire();
     void release(VulkanSwapchainSlot *slot);
 
-    // TODO: Add support for previous swapchain
     static std::shared_ptr<VulkanSwapchain> create(VulkanDevice *device, GraphicsBufferAllocator *allocator, const QSize &size, uint32_t format, const QVector<uint64_t> &modifiers);
 
 private:

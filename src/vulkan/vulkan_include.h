@@ -15,3 +15,13 @@
 
 #include <QLoggingCategory>
 Q_DECLARE_LOGGING_CATEGORY(KWIN_VULKAN)
+
+namespace KWin
+{
+
+// Vulkan to_string ALWAYS inlines. you can imagine how this explodes the binary size
+// probs actually makes it worse too, since cache misses are more expensive than function calls
+// So this is a wrapper that won't get inlined
+template<typename T>
+extern std::string VKto_string(T result);
+}
